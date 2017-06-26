@@ -1,0 +1,12 @@
+<!-- -*- mode: XML -*- -->
+
+<launch>
+
+  <remap from="/low_level/ackermann_cmd_mux/input/teleop" to="/vesc/ackermann_cmd_mux/input/teleop"/>
+
+
+  <include file="$(find racecar_control)/launch/teleop.launch"/>
+  <node name="ground_truth_publisher" type="ground_truth.py" pkg="bwsi" output="screen"/>
+
+
+</launch>
