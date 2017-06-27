@@ -7,6 +7,18 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import Header
 import tf
 import tf.transformations
+from ar_monitor import ArMonitor
+from scipy.stats import norm
+
+def sum_to_one(v):
+    return v/sum(v)
+
+def normalize(v):
+    norm=np.linalg.norm(v)
+    if norm==0: 
+       return v
+    return v/norm
+
 
 
 def transform_matrix((x,y,theta)):
@@ -65,7 +77,9 @@ def pose_to_pos_quat(pose):
 
 
 class PoseEstimator:
-    def __init__(self, particles=100, init_pose=(0.,0.,0.)):
+    ar_locations = {1: (1,0,0) }
+
+    def __init__(self, particles=500, init_pose=(0.,0.,0.)):
         self.shape = (particles, 3)
         self.num_particles = particles
         self.particle_range = np.arange(particles)
@@ -74,7 +88,7 @@ class PoseEstimator:
         self.alphas = [1e-6]*4 #TODO let these be modified
         rospy.loginfo("pose estimator is initialized")
         self.prev_odom = None
-        self.pose_pub = rospy.Subscriber("mle_pose", PoseStamped, queue_size=1)
+        self.pose_pub = rospy.Publisher("mle_pose", PoseStamped, queue_size=1)
         self.belief_pub = rospy.Publisher("belief", PoseArray, queue_size=1)
         self.odom_cb = rospy.Subscriber("/vesc/odom/", Odometry, \
                                         self.cb_odom, queue_size=1)
@@ -82,6 +96,16 @@ class PoseEstimator:
                 PoseWithCovarianceStamped, self.clicked_pose, queue_size=1)
 
         self.br = tf.TransformBroadcaster()
+        self.ar_monitor = ArMonitor(cb_func=self.cb_obs)
+
+
+    def cb_obs(self,markers):
+        for i, delta in markers.items():
+            if not i in self.ar_locations: continue
+            ar_pose = self.ar_locations[i]
+            curr_pose = [(m-d) for (m,d) in zip(ar_pose, delta)]
+            self.mcl(None, curr_pose)
+
 
     def cb_odom(self,data):
         if self.prev_odom == None:
@@ -116,6 +140,11 @@ class PoseEstimator:
         pa.poses = particles_to_poses(self.particles)
         self.belief_pub.publish(pa)
         pos,quat = pose_to_pos_quat(self.mle_pose)
+        msg = PoseStamped()
+        msg.header = pa.header
+        msg.pose = Pose(Point(*pos), Quaternion(*quat))
+
+        self.pose_pub.publish(msg)
         #self.br.sendTransform(pos,quat,rospy.Time.now(),"base_link", "pf_odom")
 
 
@@ -124,6 +153,7 @@ class PoseEstimator:
             self.sample_motion_model(u)
         if z is not None:
             self.measurement_model(z)
+            self.inject_samples(z)
             self.reweight_samples()
         self.publish_pose()
         return
@@ -165,19 +195,34 @@ class PoseEstimator:
         self.particles += deltas
         return
 
+
     def measurement_model(self, z):
         if z is None:
             return 
-        # ignore for now
+        x = self.particles[:,0]
+        y = self.particles[:,1]
+        px = norm.pdf(x, scale=2.0, loc=z[0])
+        py = norm.pdf(y, scale=2.0, loc=z[1])
+        self.weights = sum_to_one(np.multiply(px, py))
         return
 
+    def inject_samples(self, z):
+        unlikely = self.weights < 0.1/self.num_particles
+        random = np.random.uniform(0,1,self.num_particles) < .3
+        inserts = np.where( np.logical_or(unlikely, random) )
+        self.particles[inserts] = z
+        self.weights[inserts] = .01/self.num_particles
+        self.weights = sum_to_one(self.weights)
+
     def reweight_samples(self):
-        self.particles = self.particles[np.random.choice(
+        samples = np.random.choice(
                             a = self.particle_range, 
                             size = self.num_particles,
                             replace=True, 
                             p=self.weights
-                            )]
+                            )
+        self.particles = self.particles[samples] 
+        self.weights = sum_to_one( self.weights[samples])
 
 
 if __name__=="__main__":

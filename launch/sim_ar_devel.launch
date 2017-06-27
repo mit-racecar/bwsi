@@ -1,0 +1,6 @@
+<launch>
+<include file="$(find racecar_gazebo)/launch/racecar_ar.launch"/>
+<include file="$(find bwsi)/launch/teleop_only.launch"/>
+<include file="$(find bwsi)/launch/ar.launch"/>
+<node name="rviz" type="rviz" pkg="rviz" output="screen" args="-d $(find bwsi)/launch/sim_ar_devel.rviz" />
+</launch>
