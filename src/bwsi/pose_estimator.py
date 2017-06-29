@@ -136,10 +136,10 @@ class PoseEstimator:
         pose = msg.pose.pose
         self.weights = np.ones(self.num_particles) / float(self.num_particles)
 
-        self.particles[:, 0] = pose.position.x + self.normal(.5)
-        self.particles[:, 1] = pose.position.y + self.normal(.5)
+        self.particles[:, 0] = pose.position.x + self.normal(.2)
+        self.particles[:, 1] = pose.position.y + self.normal(.2)
         self.particles[:, 2] = quaternion_to_angle(
-            pose.orientation) + self.normal(.4)
+            pose.orientation) + self.normal(.3)
 
     def publish_pose(self):
         self.mle_pose = np.dot(self.particles.transpose(), self.weights)
@@ -153,7 +153,7 @@ class PoseEstimator:
         msg.pose = Pose(Point(*pos), Quaternion(*quat))
 
         self.pose_pub.publish(msg)
-        #self.br.sendTransform(pos,quat,rospy.Time.now(),"base_link", "pf_odom")
+        self.br.sendTransform(pos,quat,rospy.Time.now(),"base_link", "odom")
 
     def mcl(self, u, z):
         if u is not None:
@@ -185,9 +185,6 @@ class PoseEstimator:
         dev1 = a1 * r1 + a2 * t
         dev2 = a3 * t + a4 * r1 + a4 * r2
         dev3 = a1 * r2 + a2 * t
-        if dev1 == 0: dev1 = 0.1
-        if dev2 == 0: dev2 = 0.1
-        if dev3 == 0: dev3 = 0.1
 
         if dev1 == 0:
             rot1_samples = np.ones(self.num_particles)*delta_rot1
@@ -221,8 +218,8 @@ class PoseEstimator:
             return
         x = self.particles[:, 0]
         y = self.particles[:, 1]
-        px = norm.pdf(x, scale=2.0, loc=z[0])
-        py = norm.pdf(y, scale=2.0, loc=z[1])
+        px = norm.pdf(x, scale=1.0, loc=z[0])
+        py = norm.pdf(y, scale=1.0, loc=z[1])
         self.weights = sum_to_one(np.multiply(px, py))
         return
 
