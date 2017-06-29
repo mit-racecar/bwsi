@@ -185,12 +185,24 @@ class PoseEstimator:
         dev1 = a1 * r1 + a2 * t
         dev2 = a3 * t + a4 * r1 + a4 * r2
         dev3 = a1 * r2 + a2 * t
+        if dev1 == 0: dev1 = 0.1
+        if dev2 == 0: dev2 = 0.1
+        if dev3 == 0: dev3 = 0.1
 
-        rot1_samples = delta_rot1 - \
+        if dev1 == 0:
+            rot1_samples = np.ones(self.num_particles)*delta_rot1
+        else:
+            rot1_samples = delta_rot1 - \
             np.random.normal(0., dev1, self.num_particles)
-        trans_samples = delta_trans - \
+        if dev2 == 0:
+            trans_samples = np.ones(self.num_particles)*delta_trans
+        else:
+            trans_samples = delta_trans - \
             np.random.normal(0., dev2, self.num_particles)
-        rot2_samples = delta_rot2 - \
+        if dev3 == 0:
+            rot2_samples = np.ones(self.num_particles)*delta_rot2
+        else:
+            rot2_samples = delta_rot2 - \
             np.random.normal(0., dev3, self.num_particles)
 
         # lines 8-10
