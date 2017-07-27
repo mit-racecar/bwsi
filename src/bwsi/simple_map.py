@@ -6,7 +6,7 @@ Author: Ariel Anders
 """
 
 from visualization_msgs.msg import Marker, MarkerArray
-from geometry_msgs.msg import Pose, Vector3, Quaternion, Point
+from geometry_msgs.msg import Pose, Vector3, Quaternion, Point, PointStamped
 from std_msgs.msg import Header,ColorRGBA
 import rospy
 import numpy as np
@@ -50,13 +50,13 @@ class SimpleMap:
     COLORS = {'ground': (1,1,1,1), 'obs':(.3,.3,.3,1), 'ar':(0,0,0,1)}
     THICKNESS = {'ground':.0001, 'obs':1, 'ar':.2}
     K_a = 1
-    K_r = 1
-    Obs_ignore = .5
+    K_r = 2
+    Obs_ignore = .75
     Obs_gamma = 2
 
 
     def __init__(self, ground, obstacles, ar_tags):
-        self.goal = 1.0, 1.0
+        self.goal = None
         self.GROUND = ground
         self.OBSTACLES = obstacles
         self.AR_TAGS = ar_tags
@@ -66,15 +66,25 @@ class SimpleMap:
         self.LINES += [line_segments(0,0,*self.GROUND)]
         rospy.sleep(.5)
         self.drawMap()
-        
-
+        self.goal_sub = rospy.Subscriber('clicked_point', PointStamped,self.goal_cb,queue_size=1)
+        print "completed"
+    
+    def goal_cb(self, msg):
+        self.goal = np.array([msg.point.x, msg.point.y])
+        rospy.loginfo( "updated goal to %s" % self.goal )
+        self.drawVectorField()
 
     def distanceFromObs(self, pt):
         dists = [distance_to_poly(pt, l) for l in self.LINES]
         return dists
 
-    def potential_attract(self, pt, goal):
-        return np.array([0, 0])
+    def potential_attract(self, pt):
+        if self.goal is None:
+            return np.array([0,0])
+        else:
+            e = self.goal - np.array(pt)
+            u = e*(0.5*np.linalg.norm(e)**2) 
+            return u
 
     def potential_repulse(self, pt):
         def get_u(r, vector):
@@ -87,7 +97,7 @@ class SimpleMap:
         return np.sum(u_s, axis=0)
 
     def potential(self, pt):
-        a = self.potential_attract(pt, (10,10))
+        a = self.potential_attract(pt)
         r = self.potential_repulse(pt)
         u = self.K_a*a + self.K_r*r
         th = np.arctan2(u[1], u[0])
@@ -95,14 +105,23 @@ class SimpleMap:
         return r,th
 
     def drawVectorField(self):
+        self.clearMarkers(vector=True)
         ma = MarkerArray()
         x = np.linspace(0.05, self.GROUND[0], 30)
         y = np.linspace(0.05, self.GROUND[1], 30)
 
         for pt in product(x,y):
             r,th = self.potential(pt)
-            #if r <= 1e-5: continue
             ma.markers.append(self.drawArrow(pt[0],pt[1],r,th))
+        if self.goal is not None:
+            m = self.stamp(Marker())
+            m.pose = to_pose(self.goal[0], self.goal[1], 0)
+            m.type = 2
+            m.color = ColorRGBA(0,1,0,1)
+            m.scale = Vector3(.5,.5,.5)
+            m.ns ="maps"
+            m.id=hash('goal')%1000
+            ma.markers.append(m)
         self.vf_pub.publish(ma)
 
 
@@ -136,7 +155,7 @@ class SimpleMap:
         m.color = ColorRGBA(*self.COLORS[name])
         return m
 
-    def clearMarkers(self, maps=True, vector=True):
+    def clearMarkers(self, maps=False, vector=False):
         ma = MarkerArray()
         ma.markers= [self.stamp(Marker())]
         ma.markers[0].action = 3
@@ -145,7 +164,7 @@ class SimpleMap:
         if vector: self.vf_pub.publish(ma)
 
     def drawMap(self):
-        self.clearMarkers()
+        self.clearMarkers(maps=True)
         ma = MarkerArray()
         ma.markers = [self.drawRect('ground',0,0,0, *self.GROUND)]
         for i,o in enumerate(self.OBSTACLES):
