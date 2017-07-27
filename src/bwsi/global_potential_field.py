@@ -104,7 +104,7 @@ class GlobalPotentialField:
         self.GROUND = ground
         self.OBSTACLES = obstacles
         self.AR_TAGS = ar_tags
-        self.map_pub = rospy.Publisher('simplemap', MarkerArray, queue_size=1)
+        self.map_pub = rospy.Publisher('simple_map', MarkerArray, queue_size=1)
         self.vf_pub = rospy.Publisher('vector_field', MarkerArray, queue_size=1)
         self.LINES = [self.lineSegments(*obs) for obs in obstacles]
         self.LINES += [self.lineSegments(0,0,*self.GROUND)]
@@ -116,6 +116,7 @@ class GlobalPotentialField:
         self.drawVectorField()
         self.goal_sub = rospy.Subscriber('clicked_point', \
                 PointStamped,self.goalCB,queue_size=1)
+        rospy.loginfo("Done initializing global potential field.  View RVIZ ")
     
     def goalCB(self, msg):
         self.goal = np.array([msg.point.x, msg.point.y])
