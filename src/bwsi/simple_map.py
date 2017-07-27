@@ -11,6 +11,7 @@ from std_msgs.msg import Header,ColorRGBA
 import rospy
 import numpy as np
 import cv_bridge
+from itertools import product
 
 from tf.transformations import quaternion_from_euler, euler_from_quaternion
 
@@ -22,11 +23,10 @@ to_pose=lambda x,y,th:Pose(Point(x,y,0),to_quat(th))
 def dist_pt_to_segment(pt, s):
     pt = np.array(pt)
     s = np.array(s[0]), np.array(s[1])
-    dist= lambda x: np.linalg.norm(x)
+    dist= lambda x,y: (np.linalg.norm(x-y), x-y)
 
     v = s[1] - s[0]
     w = pt - s[0]
-    
     c1 = np.dot(w, v)
     if c1 <= 0: return dist(pt, s[0])
     c2 = np.dot(v,v)
@@ -34,46 +34,95 @@ def dist_pt_to_segment(pt, s):
     b = c1/c2
     pb = s[0] + b*v
     return dist(pt, pb)
-"""
-def line( (x1,y1), (x2,y2)):
-        a = y1-y2
-        b = x2-x1
-        c = (x1-x2)*y1 + (y2-y1)*x1
-        v = np.array([a,b,c])
-        v = v/(np.sqrt(a**2 + b**2))
-        return v
 
-def get_square_eqs(x,y,w,h):
+def distance_to_poly(pt, lines):
+    dists = [dist_pt_to_segment(pt,l) for l in lines]
+    dists = sorted(dists, key=lambda x: x[0])
+    return dists[0]
+
+def line_segments(x,y,w,h):
     points = np.array([ (0,0), (w,0), (w,h), (0, h)])
     points = points + np.array([x,y])
-    lines = [line(points[i-1], points[i])for i in range(len(points))]
+    lines = [(points[i-1], points[i])for i in range(len(points))]
     return np.array(lines, dtype=np.float32)
-
-def perp_distance(pt, eqs):
-    dists = np.dot(pt,eqs[:,:2].T) + eqs[:,2]
-    if all(dists >0) or all(dists <0):
-        return 0
-    else:
-        return abs(dists)
-"""
 
 class SimpleMap:
     COLORS = {'ground': (1,1,1,1), 'obs':(.3,.3,.3,1), 'ar':(0,0,0,1)}
     THICKNESS = {'ground':.0001, 'obs':1, 'ar':.2}
+    K_a = 1
+    K_r = 1
+    Obs_ignore = .5
+    Obs_gamma = 2
+
 
     def __init__(self, ground, obstacles, ar_tags):
-
+        self.goal = 1.0, 1.0
         self.GROUND = ground
         self.OBSTACLES = obstacles
         self.AR_TAGS = ar_tags
         self.map_pub = rospy.Publisher('simplemap', MarkerArray, queue_size=1)
         self.vf_pub = rospy.Publisher('vector_field', MarkerArray, queue_size=1)
+        self.LINES = [line_segments(*obs) for obs in obstacles]
+        self.LINES += [line_segments(0,0,*self.GROUND)]
         rospy.sleep(.5)
         self.drawMap()
-    
+        
+
+
+    def distanceFromObs(self, pt):
+        dists = [distance_to_poly(pt, l) for l in self.LINES]
+        return dists
+
+    def potential_attract(self, pt, goal):
+        return np.array([0, 0])
+
+    def potential_repulse(self, pt):
+        def get_u(r, vector):
+            if r<=1e-5 or r > self.Obs_ignore:
+                return np.array([0,0])
+            scale = (1.0/self.Obs_gamma)*((1.0/r)**self.Obs_gamma)
+            return scale*vector
+        dist = self.distanceFromObs(pt)
+        u_s = np.array([get_u(d, v) for (d,v)  in dist])
+        return np.sum(u_s, axis=0)
+
+    def potential(self, pt):
+        a = self.potential_attract(pt, (10,10))
+        r = self.potential_repulse(pt)
+        u = self.K_a*a + self.K_r*r
+        th = np.arctan2(u[1], u[0])
+        r = np.linalg.norm(u)
+        return r,th
+
+    def drawVectorField(self):
+        ma = MarkerArray()
+        x = np.linspace(0.05, self.GROUND[0], 30)
+        y = np.linspace(0.05, self.GROUND[1], 30)
+
+        for pt in product(x,y):
+            r,th = self.potential(pt)
+            #if r <= 1e-5: continue
+            ma.markers.append(self.drawArrow(pt[0],pt[1],r,th))
+        self.vf_pub.publish(ma)
+
+
     def stamp(self, msg):
         msg.header = Header(0, rospy.Time.now(), 'odom')
         return msg
+
+    def drawArrow(self, x, y, r, th):
+        r = max(.2, min(1, r *0.01))
+        m = self.stamp(Marker())
+        m.id = hash("%s%s"%(x,y))%10000
+        m.type = 0
+        m.action = 0
+        m.ns = "maps"
+        x2,y2 = x+ r*np.cos(th), y+r*np.sin(th)
+        m.points =[ Point(x,y,0), Point(x2,y2,0)]
+        m.scale=Vector3(.025, .05, 0.1)
+        m.color = ColorRGBA(1,0,0,1)
+        return m
+
 
     def drawRect(self, name, index, x, y, w, h):
         m = self.stamp(Marker())
@@ -87,7 +136,16 @@ class SimpleMap:
         m.color = ColorRGBA(*self.COLORS[name])
         return m
 
+    def clearMarkers(self, maps=True, vector=True):
+        ma = MarkerArray()
+        ma.markers= [self.stamp(Marker())]
+        ma.markers[0].action = 3
+        ma.markers[0].ns="maps"
+        if maps: self.map_pub.publish(ma)
+        if vector: self.vf_pub.publish(ma)
+
     def drawMap(self):
+        self.clearMarkers()
         ma = MarkerArray()
         ma.markers = [self.drawRect('ground',0,0,0, *self.GROUND)]
         for i,o in enumerate(self.OBSTACLES):
@@ -95,6 +153,8 @@ class SimpleMap:
         for i, (x,y,th) in enumerate(self.AR_TAGS):
             ma.markers.append(self.drawRect('ar', i, x,y,.1,.1))
         self.map_pub.publish(ma)
+        self.drawVectorField()
+        print "done"
 
         
 
@@ -116,8 +176,8 @@ if __name__=="__main__":
         ]
  
     
-    #sm = SimpleMap(GROUND, OBSTACLES, AR_TAGS)
-    #rospy.spin()
+    sm = SimpleMap(GROUND, OBSTACLES, AR_TAGS)
+    rospy.spin()
 
 
 
