@@ -66,8 +66,8 @@ class SimpleMap:
         self.LINES += [line_segments(0,0,*self.GROUND)]
         rospy.sleep(.5)
         self.drawMap()
-        self.goal_sub = rospy.Subscriber('clicked_point', PointStamped,self.goal_cb,queue_size=1)
-        print "completed"
+        self.goal_sub = rospy.Subscriber('clicked_point', \
+                PointStamped,self.goal_cb,queue_size=1)
     
     def goal_cb(self, msg):
         self.goal = np.array([msg.point.x, msg.point.y])
@@ -114,14 +114,7 @@ class SimpleMap:
             r,th = self.potential(pt)
             ma.markers.append(self.drawArrow(pt[0],pt[1],r,th))
         if self.goal is not None:
-            m = self.stamp(Marker())
-            m.pose = to_pose(self.goal[0], self.goal[1], 0)
-            m.type = 2
-            m.color = ColorRGBA(0,1,0,1)
-            m.scale = Vector3(.5,.5,.5)
-            m.ns ="maps"
-            m.id=hash('goal')%1000
-            ma.markers.append(m)
+            ma.markers.append(self.drawGoal())
         self.vf_pub.publish(ma)
 
 
@@ -140,6 +133,16 @@ class SimpleMap:
         m.points =[ Point(x,y,0), Point(x2,y2,0)]
         m.scale=Vector3(.025, .05, 0.1)
         m.color = ColorRGBA(1,0,0,1)
+        return m
+
+    def drawGoal(self):
+        m = self.stamp(Marker())
+        m.pose = to_pose(self.goal[0], self.goal[1], 0)
+        m.type = 2
+        m.color = ColorRGBA(0,1,0,1)
+        m.scale = Vector3(.5,.5,.5)
+        m.ns ="maps"
+        m.id=hash('goal')%1000
         return m
 
 
