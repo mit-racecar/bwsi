@@ -165,7 +165,7 @@ class GlobalPotentialField:
     """
  
     def stamp(self, msg):
-        msg.header = Header(0, rospy.Time.now(), 'odom')
+        msg.header = Header(0, rospy.Time.now(), 'map')
         return msg
 
     def drawVectorField(self):
